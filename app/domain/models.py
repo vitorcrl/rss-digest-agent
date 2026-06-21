@@ -33,7 +33,7 @@ class Feed(Base):
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    articles = relationship("Article", back_populates="feed", lazy="dynamic")
+    articles = relationship("Article", back_populates="feed")
 
 
 class Article(Base):

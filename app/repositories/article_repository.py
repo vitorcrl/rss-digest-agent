@@ -44,6 +44,7 @@ class ArticleRepository:
             .where(
                 Article.is_relevant.is_(True),
                 Article.created_at >= run_date,
+                Article.created_at < run_date + timedelta(days=1),
             )
             .order_by(Article.relevance_score.desc())
             .limit(limit)

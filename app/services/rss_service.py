@@ -14,7 +14,7 @@ class RSSService:
     async def fetch_articles(self, feed: Feed) -> list[Article]:
         parsed = feedparser.parse(feed.url)
 
-        status = parsed.get("status", 200)
+        status = parsed.get("status") or 200
         if status >= 400 or not parsed.entries:
             raise FeedFetchError(f"Failed to fetch feed {feed.url} (status {status})")
 
