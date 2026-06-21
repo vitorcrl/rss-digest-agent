@@ -2,7 +2,7 @@
 
 Agente autônomo que consome feeds RSS de tecnologia, filtra artigos por relevância usando a **Claude API**, gera resumos em português e entrega um digest diário via webhook.
 
-> Projeto em desenvolvimento ativo.
+> Em desenvolvimento — pipeline core completo, faltam rotas, scheduler e Docker.
 
 ---
 
