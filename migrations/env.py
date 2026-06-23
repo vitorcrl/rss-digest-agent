@@ -28,18 +28,21 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def do_run_migrations(connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
 async def run_migrations_online() -> None:
     connectable = create_async_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
-        await connection.run_sync(
-            lambda conn: context.configure(
-                connection=conn,
-                target_metadata=target_metadata,
-                compare_type=True,
-            )
-        )
-        await connection.run_sync(lambda conn: context.run_migrations())
+        await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()
 
@@ -48,4 +51,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())
-

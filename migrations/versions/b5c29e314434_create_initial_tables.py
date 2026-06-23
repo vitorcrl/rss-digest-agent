@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "feeds",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("url", sa.Text, nullable=False, unique=True),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("category", sa.String(50), nullable=False),
@@ -31,7 +31,7 @@ def upgrade() -> None:
 
     op.create_table(
         "articles",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("feed_id", UUID(as_uuid=True), sa.ForeignKey("feeds.id"), nullable=False),
         sa.Column("title", sa.Text, nullable=False),
         sa.Column("url", sa.Text, nullable=False, unique=True),
@@ -47,7 +47,7 @@ def upgrade() -> None:
 
     op.create_table(
         "digest_runs",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("run_date", sa.Date, nullable=False, unique=True),
         sa.Column(
             "status",
@@ -66,7 +66,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("digest_runs")
+    op.execute("DROP TYPE IF EXISTS digeststatus")
     op.drop_index("ix_articles_content_hash", "articles")
     op.drop_table("articles")
     op.drop_table("feeds")
-    op.execute("DROP TYPE IF EXISTS digeststatus")
