@@ -86,9 +86,9 @@ async def get_digest_run(digest_id: UUID, session: AsyncSession = Depends(get_se
 
 @router.get("/articles", response_model=list[ArticleResponse])
 async def list_articles(
-    run_date: date = Query(default=None),
+    run_date: date | None = Query(default=None),
     relevant_only: bool = Query(default=False),
-    feed_id: UUID = Query(default=None),
+    feed_id: UUID | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ):
     target_date = run_date or date.today()

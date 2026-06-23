@@ -60,9 +60,9 @@ class DigestService:
             if not new_articles:
                 logger.info("No new articles for %s", today)
                 digest.status = DigestStatus.delivered
+                digest.articles_processed = 0
                 digest.articles_selected = 0
                 digest.tokens_used = 0
-                digest.delivered_at = datetime.utcnow()
                 return await self._digest_repo.save(digest)
 
             # 3. FILTER — batch relevance scoring via Claude Haiku
