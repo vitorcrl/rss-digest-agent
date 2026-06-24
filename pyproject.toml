@@ -3,7 +3,6 @@ name = "rss-digest-agent"
 version = "0.1.0"
 description = "Autonomous RSS digest agent powered by Claude API"
 authors = ["Vitor Carlos <vitorcarlos1312@gmail.com>"]
-python = "^3.12"
 
 [tool.poetry.dependencies]
 python = "^3.12"
@@ -29,3 +28,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+markers = [
+    "integration: marks tests as integration tests (require a running database)",
+]
