@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,7 +79,7 @@ class DigestService:
             for article in relevant:
                 summary, tokens = await self._ai.summarize(article)
                 article.summary_pt = summary
-                article.processed_at = datetime.utcnow()
+                article.processed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 total_tokens += tokens
 
             # 5. PERSIST — save all articles to the database
@@ -103,7 +103,7 @@ class DigestService:
 
             # 8. LOG — mark as delivered
             digest.status = DigestStatus.delivered
-            digest.delivered_at = datetime.utcnow()
+            digest.delivered_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         except DeliveryError as exc:
             logger.error("Delivery failed: %s", exc)

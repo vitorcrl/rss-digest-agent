@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -31,7 +31,7 @@ class Feed(Base):
     name = Column(String(100), nullable=False)
     category = Column(String(50), nullable=False)
     active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     articles = relationship("Article", back_populates="feed")
 
@@ -49,7 +49,7 @@ class Article(Base):
     summary_pt = Column(Text, nullable=True)
     is_relevant = Column(Boolean, default=False, nullable=False)
     processed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     feed = relationship("Feed", back_populates="articles")
 
@@ -65,4 +65,4 @@ class DigestRun(Base):
     tokens_used = Column(Integer, default=0, nullable=False)
     delivered_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)

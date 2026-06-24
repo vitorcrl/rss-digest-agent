@@ -1,5 +1,5 @@
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 
 import feedparser
 
@@ -46,4 +46,4 @@ class RSSService:
             return datetime(*entry.published_parsed[:6])
         if "updated_parsed" in entry and entry.updated_parsed:
             return datetime(*entry.updated_parsed[:6])
-        return datetime.utcnow()
+        return datetime.now(timezone.utc).replace(tzinfo=None)
