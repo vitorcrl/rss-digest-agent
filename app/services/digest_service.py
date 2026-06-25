@@ -86,9 +86,9 @@ class DigestService:
             await self._article_repo.create_bulk(new_articles)
 
             # 6. COMPILE — pick top N by relevance score
-            top_articles = await self._article_repo.get_relevant_by_date(
-                today, limit=settings.AI_MAX_ARTICLES_PER_DIGEST
-            )
+            top_articles = sorted(relevant, key=lambda a: a.relevance_score or 0, reverse=True)[
+                : settings.AI_MAX_ARTICLES_PER_DIGEST
+            ]
 
             digest.articles_selected = len(top_articles)
             digest.tokens_used = total_tokens
