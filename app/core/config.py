@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,4 +56,15 @@ class Settings(BaseSettings):
         return [t.strip().upper() for t in self.FII_WATCHLIST.split(",") if t.strip()]
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    # lru_cache garante que o .env é lido uma única vez em toda a execução.
+    # Nos testes, basta chamar get_settings.cache_clear() para resetar entre casos.
+    # Evita o problema de `settings = Settings()` no topo do módulo, que executa
+    # em import time e quebra testes que rodam sem .env configurado.
+    return Settings()
+
+
+# Atalho para código que já usava `from app.core.config import settings`
+# sem precisar refatorar nada — aponta para a instância cacheada.
+settings = get_settings()

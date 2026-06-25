@@ -123,7 +123,17 @@ class DigestContext:
     alerts: list[Alert]               # apenas os alertas disparados hoje
     scores: dict[str, int] = field(default_factory=dict)  # ticker → score 0–100
 
-    # Metadados opcionais que o narrator pode usar no rodapé da mensagem
-    watchlist_size: int = 0       # total de ativos monitorados
-    total_alerts: int = 0         # total de alertas (pode diferir de len(alerts) se agrupado)
-    total_events: int = 0         # proventos anunciados + outros eventos informativos
+    @property
+    def watchlist_size(self) -> int:
+        """Total de ativos monitorados — derivado de snapshots, nunca desincroniza."""
+        return len(self.snapshots)
+
+    @property
+    def total_alerts(self) -> int:
+        """Total de alertas com severity warning ou critical."""
+        return sum(1 for a in self.alerts if a.severity != AlertSeverity.info)
+
+    @property
+    def total_events(self) -> int:
+        """Eventos informativos — proventos anunciados e outros severity=info."""
+        return sum(1 for a in self.alerts if a.severity == AlertSeverity.info)

@@ -34,8 +34,11 @@ class AssetSnapshotORM(Base):
 
     __tablename__ = "asset_snapshots"
     __table_args__ = (
-        # Índice composto porque quase toda query filtra por ticker E data.
-        Index("ix_asset_snapshots_ticker_date", "ticker", "date"),
+        # UniqueConstraint garante que só existe um snapshot por (ticker, date).
+        # Sem isso, dois fetches no mesmo dia gerariam dois registros — os deltas
+        # ficariam errados porque o pipeline pegaria o primeiro ao comparar.
+        # O índice composto junto otimiza as queries de busca por range de datas.
+        Index("ix_asset_snapshots_ticker_date", "ticker", "date", unique=True),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -14,13 +14,19 @@ from datetime import date, datetime, timezone
 
 import httpx
 
-from app.core.config import settings
+from app.core.config import get_settings
 from app.domain.models_asset import AssetSnapshot
 
 logger = logging.getLogger(__name__)
 
 # Timeout generoso porque brapi.dev pode ser lento em horário de pico
 _HTTP_TIMEOUT = 15.0
+
+
+# BrapiError declarado antes de qualquer uso para evitar confusão na leitura
+class BrapiError(Exception):
+    """Erro ao buscar dados na brapi.dev — capturado pelo pipeline por ticker."""
+    pass
 
 
 class BrapiDataAdapter:
@@ -32,9 +38,12 @@ class BrapiDataAdapter:
         snapshot = await adapter.fetch("KNCR11")
     """
 
-    def __init__(self, base_url: str = settings.BRAPI_BASE_URL, token: str = settings.BRAPI_TOKEN) -> None:
-        self._base_url = base_url
-        self._token = token
+    def __init__(self, base_url: str | None = None, token: str | None = None) -> None:
+        # Lê settings sob demanda (não em import time) para não quebrar testes
+        # que rodam sem .env. get_settings() usa lru_cache, então é barato.
+        _settings = get_settings()
+        self._base_url = base_url or _settings.BRAPI_BASE_URL
+        self._token = token or _settings.BRAPI_TOKEN
 
     async def fetch(self, ticker: str) -> AssetSnapshot:
         """
@@ -73,10 +82,17 @@ class BrapiDataAdapter:
         price = _require_float(data, "regularMarketPrice", ticker)
 
         # --- Indicadores fundamentalistas ---
-        # brapi.dev retorna None para campos que o fundo não divulga
         dy_12m = _to_float(data.get("dividendYield")) or 0.0
-        pvp = _to_float(data.get("priceToBook")) or 1.0
-        liquidez = _to_float(data.get("averageDailyVolume10Day")) or 0.0
+
+        # P/VP retorna None se a API não tem o dado — NÃO fazemos fallback para 1.0
+        # porque isso silenciaria a regra de P/VP alto (ex: pvp > 1.15 nunca dispararia)
+        pvp = _to_float(data.get("priceToBook"))
+
+        # Liquidez financeira = volume médio de cotas × preço de fechamento.
+        # averageDailyVolume10Day é em cotas (não em R$) — multiplicar pelo preço
+        # converte para volume financeiro, que é o que as regras usam como threshold.
+        avg_volume_shares = _to_float(data.get("averageDailyVolume10Day")) or 0.0
+        liquidez = avg_volume_shares * price
 
         # Vacância só existe para fundos de tijolo (shoppings, lajes, logística)
         vacancia = _to_float(data.get("vacancyRate"))
@@ -88,8 +104,8 @@ class BrapiDataAdapter:
         provento_anunciado = _extract_latest_provento(data, ticker)
 
         logger.info(
-            "Fetched %s: price=%.2f dy=%.2f%% pvp=%.2f",
-            ticker, price, dy_12m, pvp,
+            "Fetched %s: price=%.2f dy=%.2f%% pvp=%s liquidez=%.0f",
+            ticker, price, dy_12m, f"{pvp:.2f}" if pvp is not None else "N/A", liquidez,
         )
 
         return AssetSnapshot(
@@ -98,7 +114,7 @@ class BrapiDataAdapter:
             date=date.today(),
             price=price,
             dy_12m=dy_12m,
-            pvp=pvp,
+            pvp=pvp if pvp is not None else 0.0,  # 0.0 aqui é safe — regras checam pvp > threshold
             vacancia=vacancia,
             ltv=ltv,
             liquidez=liquidez,
@@ -136,10 +152,18 @@ def _extract_latest_provento(data: dict, ticker: str) -> float | None:
     if not dividends:
         return None
 
-    # A lista já vem ordenada por data decrescente
-    latest = dividends[0]
-    declared_date_raw = latest.get("declarationDate") or latest.get("paymentDate")
+    # Ordena explicitamente por data decrescente — a brapi não garante a ordem
+    def _parse_date(d: dict) -> date:
+        raw = d.get("declarationDate") or d.get("paymentDate") or ""
+        try:
+            return datetime.fromisoformat(raw).date()
+        except ValueError:
+            return date.min  # coloca no final se não parsear
 
+    sorted_dividends = sorted(dividends, key=_parse_date, reverse=True)
+    latest = sorted_dividends[0]
+
+    declared_date_raw = latest.get("declarationDate") or latest.get("paymentDate")
     if not declared_date_raw:
         return None
 
@@ -154,8 +178,3 @@ def _extract_latest_provento(data: dict, ticker: str) -> float | None:
         return None
 
     return _to_float(latest.get("rate"))
-
-
-class BrapiError(Exception):
-    """Erro ao buscar dados na brapi.dev — capturado pelo pipeline por ticker."""
-    pass
