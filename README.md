@@ -37,7 +37,7 @@ app/
 └── scheduler/     # cron job diário
 migrations/        # Alembic (versões e env.py async)
 tests/
-├── unit/          # 63 testes, sem banco
+├── unit/          # 66 testes, sem banco
 └── integration/   # 3 testes, requerem PostgreSQL
 ```
 
@@ -81,7 +81,6 @@ A aplicação sobe na porta `8000`. As migrations rodam automaticamente na inici
 ### Local (sem Docker)
 
 ```bash
-# banco PostgreSQL precisa estar rodando
 cp .env.example .env
 
 poetry install
