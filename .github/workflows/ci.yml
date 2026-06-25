@@ -7,8 +7,36 @@ on:
     branches: ["main"]
 
 jobs:
-  test:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://user:pass@localhost:5432/digest_db
+      ANTHROPIC_API_KEY: fake-key-for-tests
+      DELIVERY_WEBHOOK_URL: https://example.com/webhook
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Run unit tests
+        run: poetry run pytest tests/unit/ -v --cov=app --cov-report=term-missing
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
 
     services:
       postgres:
@@ -42,12 +70,10 @@ jobs:
         run: pip install poetry
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install --no-interaction --no-root
 
-      - name: Run unit tests
-        run: poetry run pytest tests/unit/ -v --cov=app --cov-report=term-missing
+      - name: Run migrations
+        run: poetry run alembic upgrade head
 
       - name: Run integration tests
-        run: |
-          poetry run alembic upgrade head
-          poetry run pytest tests/integration/ -v -m integration
+        run: poetry run pytest tests/integration/ -v -m integration
