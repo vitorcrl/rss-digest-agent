@@ -44,17 +44,32 @@ class AssetSnapshotORM(Base):
     date = Column(Date, nullable=False)
     price = Column(Numeric(12, 4), nullable=False)
 
-    # Indicadores fundamentalistas
+    # Indicadores fundamentalistas — FIIs BR e REITs US
     dy_12m = Column(Float, nullable=False)        # dividend yield 12m em %
     pvp = Column(Float, nullable=False)           # preço / valor patrimonial
     vacancia = Column(Float, nullable=True)       # % vacância (tijolo) ou None
     ltv = Column(Float, nullable=True)            # loan-to-value % (papel) ou None
     liquidez = Column(Float, nullable=False)      # volume médio diário em R$
 
-    # Deltas salvos junto com o snapshot para evitar recalcular toda vez
-    delta_dy = Column(Float, nullable=False, default=0.0)
-    delta_vacancia = Column(Float, nullable=False, default=0.0)
-    delta_price = Column(Float, nullable=False, default=0.0)
+    # Indicadores de REITs US — None para FIIs
+    ffo_per_share = Column(Float, nullable=True)  # funds from operations por cota
+    price_ffo = Column(Float, nullable=True)      # price / FFO (equivalente ao P/L)
+    debt_ebitda = Column(Float, nullable=True)    # dívida líquida / EBITDA
+    occupancy = Column(Float, nullable=True)      # taxa de ocupação em %
+
+    # Indicadores de ações — None para FIIs e REITs
+    eps = Column(Float, nullable=True)                  # lucro por ação
+    book_value_per_share = Column(Float, nullable=True) # valor patrimonial por ação
+    roe = Column(Float, nullable=True)                  # return on equity em %
+    ev_ebitda = Column(Float, nullable=True)            # enterprise value / EBITDA
+    revenue_growth = Column(Float, nullable=True)       # crescimento de receita YoY %
+    net_margin = Column(Float, nullable=True)           # margem líquida em %
+    debt_equity = Column(Float, nullable=True)          # dívida / patrimônio líquido
+    beta = Column(Float, nullable=True)                 # volatilidade vs índice
+    payout_ratio = Column(Float, nullable=True)         # % do lucro distribuído
+
+    # Deltas NÃO são salvos: calculados em runtime (hoje - semana_passada).
+    # Guardar derivações seria redundância — o dado bruto já está aqui.
 
     # None se nenhum provento foi anunciado neste dia
     provento_anunciado = Column(Numeric(10, 4), nullable=True)
