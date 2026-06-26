@@ -2,14 +2,19 @@
 # Implementa NarratorPort.
 #
 # Filosofia de custo zero:
-#   - DigestContext.total_alerts == 0  → retorna mensagem estática (zero tokens)
-#   - DigestContext.total_alerts  > 0  → chama claude-haiku-4-5 para narrar
+#   - context.alerts vazio  → retorna mensagem estática (zero tokens)
+#   - context.alerts não vazio → chama claude-haiku-4-5 com persona do analista
 #
-# Se a chamada à API falhar por qualquer motivo (timeout, quota, etc.),
-# o TemplateNarrator entra como fallback para garantir que o Telegram
-# sempre receba uma mensagem, mesmo que sem a narrativa gerada pela Claude.
+# A persona é carregada de dois arquivos externos:
+#   - investor_profile.toml  → quem é o investidor (nome, perfil, foco)
+#   - prompts/analyst_persona.txt → system prompt com as diretrizes do analista
+#
+# Separar persona do código permite ajustar o tom sem tocar no Python.
+# Se a chamada à API falhar, o TemplateNarrator entra como fallback.
 
 import logging
+import tomllib
+from pathlib import Path
 
 import anthropic
 
@@ -26,33 +31,46 @@ _MODEL = "claude-haiku-4-5"
 # Limita a resposta a ~400 tokens — suficiente para um digest diário conciso.
 _MAX_TOKENS = 512
 
-# Ícones por severity para incluir no prompt (ajuda a Claude entender urgência)
 _ICON = {
     AlertSeverity.critical: "🚨",
     AlertSeverity.warning: "⚠️",
     AlertSeverity.info: "🔔",
 }
 
+# Caminhos padrão relativos à raiz do projeto.
+# Podem ser sobrescritos no construtor para testes ou deploys customizados.
+_DEFAULT_PROFILE = Path("investor_profile.toml")
+_DEFAULT_PERSONA = Path("app/adapters/narrators/prompts/analyst_persona.txt")
+
 
 class ClaudeHaikuNarrator:
     """
-    Narrator que usa claude-haiku-4-5 para transformar alertas técnicos em
-    texto natural para o Telegram. Implementa NarratorPort.
+    Narrator que usa claude-haiku-4-5 com persona de analista financeiro.
+    Implementa NarratorPort.
 
-    Custo: zero tokens quando não há alertas.
+    Custo: zero tokens quando não há alertas nem eventos.
     Fallback: TemplateNarrator quando a API está indisponível.
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
-        # Aceita api_key injetada (útil nos testes) ou lê de Settings.
-        # O cliente AsyncAnthropic é criado na primeira chamada para evitar
-        # import-time de Settings (que quebraria testes sem .env).
+    def __init__(
+        self,
+        api_key: str | None = None,
+        profile_path: Path | str | None = None,
+        persona_path: Path | str | None = None,
+    ) -> None:
         self._api_key = api_key
         self._client: anthropic.AsyncAnthropic | None = None
         self._fallback = TemplateNarrator()
 
+        # Carrega e compila o system prompt uma vez no construtor.
+        # Barato: leitura de dois arquivos pequenos, feita só na inicialização.
+        self._system_prompt = _load_system_prompt(
+            profile_path=Path(profile_path) if profile_path else _DEFAULT_PROFILE,
+            persona_path=Path(persona_path) if persona_path else _DEFAULT_PERSONA,
+        )
+
     def _get_client(self) -> anthropic.AsyncAnthropic:
-        # Lazy init — só cria o cliente quando narrate() é chamado pela primeira vez
+        # Lazy init — evita import-time de Settings que quebraria testes sem .env
         if self._client is None:
             key = self._api_key or get_settings().ANTHROPIC_API_KEY
             self._client = anthropic.AsyncAnthropic(api_key=key)
@@ -82,16 +100,16 @@ class ClaudeHaikuNarrator:
         )
 
         try:
-            prompt = _build_prompt(context)
             client = self._get_client()
+            user_prompt = _build_user_prompt(context)
 
             response = await client.messages.create(
                 model=_MODEL,
                 max_tokens=_MAX_TOKENS,
-                messages=[{"role": "user", "content": prompt}],
+                system=self._system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
             )
 
-            # Extrai o texto do primeiro bloco de conteúdo
             text = response.content[0].text.strip()
 
             logger.info(
@@ -103,7 +121,6 @@ class ClaudeHaikuNarrator:
             return text
 
         except anthropic.APIStatusError as exc:
-            # Erros de quota, autenticação ou modelo indisponível
             logger.warning(
                 "ClaudeHaikuNarrator: API error %s — falling back to TemplateNarrator",
                 exc.status_code,
@@ -117,68 +134,98 @@ class ClaudeHaikuNarrator:
                 "ClaudeHaikuNarrator: unexpected error — falling back to TemplateNarrator"
             )
 
-        # Fallback: mesmo sem Claude, o Telegram recebe uma mensagem estruturada
         return await self._fallback.narrate(context)
 
 
 # ---------------------------------------------------------------------------
-# Funções auxiliares de construção do prompt
+# Carregamento da persona
 # ---------------------------------------------------------------------------
 
 
-def _build_prompt(context: DigestContext) -> str:
+def _load_system_prompt(profile_path: Path, persona_path: Path) -> str:
     """
-    Monta o prompt para a Claude com o contexto completo do digest.
+    Lê o investor_profile.toml e injeta os valores no template analyst_persona.txt.
+    O resultado é o system prompt final enviado para a Claude.
+    Retorna string vazia se algum arquivo não existir — o narrator ainda funciona
+    sem persona, só perde a personalização.
+    """
+    if not profile_path.exists():
+        logger.warning("investor_profile.toml not found at %s — using generic prompt", profile_path)
+        return ""
 
-    O prompt usa a saída do TemplateNarrator como contexto estruturado para que
-    a Claude possa narrar os mesmos dados de forma mais natural e personalizada,
-    sem precisar reinterpretar o DigestContext do zero.
+    if not persona_path.exists():
+        logger.warning("analyst_persona.txt not found at %s — using generic prompt", persona_path)
+        return ""
+
+    with open(profile_path, "rb") as f:
+        profile = tomllib.load(f)
+
+    persona_template = persona_path.read_text(encoding="utf-8")
+
+    # Achata o TOML aninhado em chaves com prefixo de seção para o format()
+    # ex: profile["fii"]["foco"] → fii_foco no template
+    flat = _flatten_profile(profile)
+
+    try:
+        return persona_template.format(**flat)
+    except KeyError as exc:
+        logger.warning("analyst_persona.txt references missing key %s — using raw template", exc)
+        return persona_template
+
+
+def _flatten_profile(profile: dict, prefix: str = "") -> dict[str, str]:
+    """
+    Converte {'investor': {'nome': 'Vitor'}, 'fii': {'foco': [...]}}
+    em {'nome': 'Vitor', 'fii_foco': 'papel, logística', ...}
+    para uso direto no str.format() do template.
+    """
+    result: dict[str, str] = {}
+    for key, value in profile.items():
+        if isinstance(value, dict):
+            # Seção aninhada — achata com prefixo, exceto [investor] que vai sem prefixo
+            sub_prefix = "" if key == "investor" else f"{key}_"
+            result.update(_flatten_profile(value, prefix=sub_prefix))
+        elif isinstance(value, list):
+            result[f"{prefix}{key}"] = ", ".join(str(v) for v in value)
+        else:
+            result[f"{prefix}{key}"] = str(value)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Construção do prompt do usuário
+# ---------------------------------------------------------------------------
+
+
+def _build_user_prompt(context: DigestContext) -> str:
+    """
+    Monta a mensagem do usuário com os alertas do dia.
+    O system prompt (persona) já foi injetado separado — aqui só vai o contexto.
     """
     date_br = context.date.strftime("%d/%m/%Y")
+    alerts_text = _format_alerts(context.alerts)
 
-    # Seção de alertas agrupados por ticker
-    alerts_section = _format_alerts_for_prompt(context.alerts)
-
-    return f"""Você é um analista de fundos imobiliários (FIIs) brasileiros que envia um resumo diário pelo Telegram para um investidor individual.
-
-Data do digest: {date_br}
-Watchlist: {context.watchlist_size} fundos monitorados
-Total de alertas: {context.total_alerts}
-Total de eventos informativos: {context.total_events}
-
-Alertas do dia:
-{alerts_section}
-
-Escreva um resumo conciso e direto para o Telegram com:
-1. Uma linha de cabeçalho com a data e número de alertas
-2. Para cada fundo com alerta, explique brevemente o que o dado significa para o investidor
-3. Se houver alertas críticos (🚨), destaque-os primeiro
-4. Um rodapé com: Watchlist: {context.watchlist_size} fundos | {context.total_alerts} alertas | {context.total_events} eventos
-
-Use linguagem simples e objetiva. Evite jargões técnicos excessivos. O investidor quer saber o que fazer, não só o que aconteceu.
-Máximo de {_MAX_TOKENS} tokens na resposta."""
+    return (
+        f"Data: {date_br}\n"
+        f"Watchlist: {context.watchlist_size} fundos\n"
+        f"Alertas: {context.total_alerts} | Eventos: {context.total_events}\n"
+        f"\n"
+        f"{alerts_text}"
+    )
 
 
-def _format_alerts_for_prompt(alerts: list[Alert]) -> str:
-    """
-    Formata a lista de alertas como texto estruturado para o prompt.
-    Agrupa por ticker e ordena críticos primeiro.
-    """
+def _format_alerts(alerts: list[Alert]) -> str:
+    """Formata alertas ordenados por severity (críticos primeiro) para o prompt."""
     if not alerts:
         return "(sem alertas)"
 
-    # Ordena: críticos → warnings → info
-    _severity_order = {
-        AlertSeverity.critical: 0,
-        AlertSeverity.warning: 1,
-        AlertSeverity.info: 2,
-    }
-    sorted_alerts = sorted(alerts, key=lambda a: (_severity_order[a.severity], a.ticker))
+    _order = {AlertSeverity.critical: 0, AlertSeverity.warning: 1, AlertSeverity.info: 2}
+    sorted_alerts = sorted(alerts, key=lambda a: (_order[a.severity], a.ticker))
 
     lines: list[str] = []
     for alert in sorted_alerts:
         icon = _ICON[alert.severity]
-        streak_note = f" (há {alert.streak} semanas consecutivas)" if alert.streak > 1 else ""
-        lines.append(f"{icon} {alert.ticker} [{alert.rule}]: {alert.message}{streak_note}")
+        streak = f" (há {alert.streak} semanas)" if alert.streak > 1 else ""
+        lines.append(f"{icon} {alert.ticker} [{alert.rule}]: {alert.message}{streak}")
 
     return "\n".join(lines)
