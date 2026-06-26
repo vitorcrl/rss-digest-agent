@@ -192,6 +192,19 @@ class TestDigestServiceRun:
         mock_repos["ai"].evaluate_relevance.assert_not_called()
         mock_repos["delivery"].send.assert_not_called()
 
+    async def test_unexpected_exception_marks_as_failed(self, mock_session, mock_repos):
+        digest = make_digest()
+        mock_repos["digest_repo"].get_by_date.return_value = None
+        mock_repos["digest_repo"].create.return_value = digest
+        mock_repos["digest_repo"].save.return_value = digest
+        mock_repos["feed_repo"].get_active.side_effect = RuntimeError("db connection lost")
+
+        service = DigestService(mock_session)
+        await service.run(date(2026, 6, 24))
+
+        assert digest.status == DigestStatus.failed
+        assert digest.error_message is not None
+
     async def test_summarize_only_called_for_relevant_articles(self, mock_session, mock_repos):
         digest = make_digest()
         low = make_article(title="Low", url="https://example.com/low", hash="low")

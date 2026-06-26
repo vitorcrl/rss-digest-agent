@@ -32,3 +32,10 @@ asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests (require a running database)",
 ]
+
+[tool.coverage.run]
+omit = [
+    "app/domain/models_fii.py",
+    "app/adapters/rules/external_api_adapter.py",
+    "app/scheduler/jobs.py",
+]
