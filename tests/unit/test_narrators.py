@@ -247,6 +247,20 @@ class TestClaudeHaikuNarratorFallback:
         result = await narrator.narrate(ctx)
         assert "26/06/2026" in result
 
+    async def test_falls_back_on_unexpected_exception(self, mock_anthropic, tmp_path):
+        # Cobre linhas 132-133 — except Exception genérico
+        mock_anthropic.messages.create = AsyncMock(
+            side_effect=RuntimeError("unexpected")
+        )
+        ctx = make_context(alerts=[make_alert()])
+        narrator = ClaudeHaikuNarrator(
+            api_key="dummy",
+            profile_path=tmp_path / "missing.toml",
+            persona_path=tmp_path / "missing.txt",
+        )
+        result = await narrator.narrate(ctx)
+        assert "26/06/2026" in result
+
 
 class TestClaudeHaikuNarratorPersona:
     def test_loads_system_prompt_from_files(self, tmp_path):
@@ -271,6 +285,14 @@ class TestClaudeHaikuNarratorPersona:
         profile.write_text('[investor]\nnome = "X"')
         result = _load_system_prompt(profile, tmp_path / "missing.txt")
         assert result == ""
+
+    def test_returns_raw_template_when_key_missing_in_profile(self, tmp_path):
+        profile = tmp_path / "profile.toml"
+        persona = tmp_path / "persona.txt"
+        profile.write_text('[investor]\nnome = "Vitor"')
+        persona.write_text("Analista para {nome}, perfil {perfil_inexistente}.")
+        result = _load_system_prompt(profile, persona)
+        assert "{perfil_inexistente}" in result
 
 
 class TestFlattenProfile:

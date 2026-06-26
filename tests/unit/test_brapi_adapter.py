@@ -211,3 +211,56 @@ class TestErrorHandling:
     async def test_implements_data_port(self):
         from app.domain.ports import DataPort
         assert isinstance(BrapiDataAdapter(), DataPort)
+
+
+class TestToFloatEdgeCases:
+    async def test_non_numeric_string_returns_none(self, adapter, mock_httpx):
+        # Cobre _to_float com ValueError — brapi retorna string inválida
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"results": [{
+            "regularMarketPrice": 100.0,
+            "dividendYield": "N/A",   # string não numérica
+            "priceToBook": 0.92,
+            "averageDailyVolume10Day": 5000,
+        }]}
+        mock_httpx.get = AsyncMock(return_value=response)
+        snap = await adapter.fetch("KNCR11")
+        # dy_12m deve ser 0.0 quando a API retorna "N/A"
+        assert snap.dy_12m == 0.0
+
+
+class TestProventoEdgeCases:
+    async def test_provento_none_when_dividend_has_no_date_fields(self, adapter, mock_httpx):
+        # Cobre linha 168 — latest sem declarationDate nem paymentDate
+        dividends = [{"rate": 0.095}]  # sem nenhum campo de data
+        mock_httpx.get = AsyncMock(
+            return_value=make_brapi_response(dividends=dividends)
+        )
+        snap = await adapter.fetch("MXRF11")
+        assert snap.provento_anunciado is None
+
+    async def test_provento_none_when_date_is_malformed(self, adapter, mock_httpx):
+        # Cobre linhas 172-174 — data existe mas não é ISO válida
+        today = date.today().isoformat()
+        dividends = [{"declarationDate": "not-a-date", "rate": 0.095}]
+        mock_httpx.get = AsyncMock(
+            return_value=make_brapi_response(dividends=dividends)
+        )
+        snap = await adapter.fetch("MXRF11")
+        assert snap.provento_anunciado is None
+
+    async def test_dividend_with_invalid_sort_date_goes_last(self, adapter, mock_httpx):
+        # Cobre o path de date.min no _parse_date interno — entrada sem data válida
+        # vai pro final da ordenação, não quebra o sort
+        today = date.today().isoformat()
+        dividends = [
+            {"declarationDate": "invalido", "rate": 0.05},
+            {"declarationDate": today, "rate": 0.095},
+        ]
+        mock_httpx.get = AsyncMock(
+            return_value=make_brapi_response(dividends=dividends)
+        )
+        snap = await adapter.fetch("MXRF11")
+        # O válido (hoje) deve ganhar — não o inválido (date.min vai pro final)
+        assert snap.provento_anunciado == pytest.approx(0.095)

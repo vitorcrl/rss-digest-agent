@@ -237,3 +237,18 @@ class TestEvaluateAggregation:
         alerts = [a for a in rules.evaluate(snap)
                   if a.severity != AlertSeverity.info]
         assert alerts == []
+
+    def test_rule_exception_does_not_stop_other_rules(self, rules):
+        # Cobre linhas 58-60 — uma regra quebrando não deve derrubar as demais
+        original_rule = rules._rule_low_dy
+
+        def broken_rule(snap):
+            raise RuntimeError("regra com bug")
+
+        rules._rule_low_dy = broken_rule
+        # Com DY baixo mas regra quebrada, as outras regras ainda devem rodar
+        snap = make_snapshot(dy_12m=5.0, liquidez=100_000)
+        alerts = rules.evaluate(snap)
+        # low_liquidez ainda deve disparar mesmo com low_dy quebrada
+        assert any(a.rule == "low_liquidez" for a in alerts)
+        rules._rule_low_dy = original_rule
