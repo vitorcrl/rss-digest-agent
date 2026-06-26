@@ -98,7 +98,10 @@ class WeightedScoreEngine:
 
         # --- Liquidez baixa (-20 pts fixos) ---
         # Penalização binária: ou tem liquidez mínima ou não tem.
-        # R$500k/dia é o threshold da spec — mesmo valor do FIIRuleSet.
+        # Os thresholds aqui (500k, 15%, 60%) são fixos por design — o score
+        # é usado para alocação relativa entre fundos, não para disparar alertas.
+        # Os alertas (que o usuário vê) lêem de Settings. Se mudar o threshold
+        # no .env, o alerta muda mas o peso no score permanece estável.
         if s.liquidez < 500_000:
             score -= self._w["liquidez"]
 
