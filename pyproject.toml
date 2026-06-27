@@ -38,4 +38,5 @@ omit = [
     "app/domain/models_fii.py",
     "app/adapters/rules/external_api_adapter.py",
     "app/scheduler/jobs.py",
+    "app/scheduler/fii_runner.py",
 ]

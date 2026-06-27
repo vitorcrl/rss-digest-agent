@@ -8,8 +8,6 @@
 # o Telegram renderize igual, independente de qual narrator foi usado.
 
 import logging
-from itertools import groupby
-
 from app.domain.models_asset import Alert, AlertSeverity, DigestContext
 
 logger = logging.getLogger(__name__)
@@ -41,27 +39,38 @@ class TemplateNarrator:
         date_br = context.date.strftime("%d/%m/%Y")
         lines: list[str] = [f"📊 FIIs — {date_br}", ""]
 
-        # Ordena por severity (críticos primeiro) depois por ticker alfabético.
-        # Sem isso, um fundo com warning que vem antes no alfabeto aparecia
-        # antes de um fundo com critical — perdendo o senso de urgência visual.
+        # Cotação de cada fundo — disponível mesmo sem plano pago
+        snap_by_ticker = {s.ticker: s for s in context.snapshots}
+        for snap in context.snapshots:
+            arrow = "🔴" if snap.delta_price < 0 else "🟢"
+            sign = "+" if snap.delta_price >= 0 else ""
+            lines.append(
+                f"{arrow} {snap.ticker}  R$ {snap.price:.2f}  {sign}{snap.delta_price:.2f}%"
+            )
+        if context.snapshots:
+            lines.append("")
+
         _severity_order = {
             AlertSeverity.critical: 0,
             AlertSeverity.warning: 1,
             AlertSeverity.info: 2,
         }
-        sorted_alerts = sorted(
-            context.alerts,
-            key=lambda a: (_severity_order[a.severity], a.ticker),
-        )
-        for ticker, ticker_alerts in groupby(sorted_alerts, key=lambda a: a.ticker):
-            alerts_list = list(ticker_alerts)
 
-            # Separa warnings/criticals de events (info) para formatar diferente
+        by_ticker: dict[str, list[Alert]] = {}
+        for alert in context.alerts:
+            by_ticker.setdefault(alert.ticker, []).append(alert)
+
+        sorted_tickers = sorted(
+            by_ticker.keys(),
+            key=lambda t: min(_severity_order[a.severity] for a in by_ticker[t]),
+        )
+
+        for ticker in sorted_tickers:
+            alerts_list = by_ticker[ticker]
             problems = [a for a in alerts_list if a.severity != AlertSeverity.info]
             events = [a for a in alerts_list if a.severity == AlertSeverity.info]
 
             if problems:
-                # Usa o ícone da severidade mais alta do grupo
                 top_severity = (
                     AlertSeverity.critical
                     if any(a.severity == AlertSeverity.critical for a in problems)
@@ -74,13 +83,11 @@ class TemplateNarrator:
                 lines.append("")
 
             for event in events:
-                # Eventos informativos ficam em linha única (ex: provento anunciado)
                 lines.append(f"{_ICON[AlertSeverity.info]} {ticker} — {event.message}")
 
         if context.total_events > 0:
             lines.append("")
 
-        # Rodapé com totais — mesmo formato do exemplo da spec
         lines.append(
             f"Watchlist: {context.watchlist_size} fundos | "
             f"{context.total_alerts} alertas | "
