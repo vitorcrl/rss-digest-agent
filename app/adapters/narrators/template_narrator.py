@@ -8,8 +8,6 @@
 # o Telegram renderize igual, independente de qual narrator foi usado.
 
 import logging
-from itertools import groupby
-
 from app.domain.models_asset import Alert, AlertSeverity, DigestContext
 
 logger = logging.getLogger(__name__)
@@ -41,19 +39,26 @@ class TemplateNarrator:
         date_br = context.date.strftime("%d/%m/%Y")
         lines: list[str] = [f"📊 FIIs — {date_br}", ""]
 
-        # Ordena por severity (críticos primeiro) depois por ticker alfabético.
-        # Sem isso, um fundo com warning que vem antes no alfabeto aparecia
-        # antes de um fundo com critical — perdendo o senso de urgência visual.
         _severity_order = {
             AlertSeverity.critical: 0,
             AlertSeverity.warning: 1,
             AlertSeverity.info: 2,
         }
-        sorted_alerts = sorted(
-            context.alerts,
-            key=lambda a: (_severity_order[a.severity], a.ticker),
+
+        # Agrupa por ticker primeiro (groupby requer ordenação pela mesma key).
+        # Depois ordena os grupos pelo pior severity de cada ticker — assim um fundo
+        # com critical aparece antes de um com warning, independente do ticker alfabético.
+        by_ticker: dict[str, list[Alert]] = {}
+        for alert in context.alerts:
+            by_ticker.setdefault(alert.ticker, []).append(alert)
+
+        sorted_tickers = sorted(
+            by_ticker.keys(),
+            key=lambda t: min(_severity_order[a.severity] for a in by_ticker[t]),
         )
-        for ticker, ticker_alerts in groupby(sorted_alerts, key=lambda a: a.ticker):
+
+        for ticker in sorted_tickers:
+            ticker_alerts = by_ticker[ticker]
             alerts_list = list(ticker_alerts)
 
             # Separa warnings/criticals de events (info) para formatar diferente
