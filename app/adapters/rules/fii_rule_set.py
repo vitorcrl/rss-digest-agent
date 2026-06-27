@@ -67,6 +67,8 @@ class FIIRuleSet:
     # com cotação muito inflada em relação aos proventos distribuídos.
     # -------------------------------------------------------------------------
     def _rule_low_dy(self, s: AssetSnapshot) -> list[Alert]:
+        if s.dy_12m == 0.0:
+            return []
         if s.dy_12m < self._s.FII_MIN_DY:
             return [Alert(
                 ticker=s.ticker,

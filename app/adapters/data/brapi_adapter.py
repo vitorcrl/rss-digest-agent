@@ -55,8 +55,6 @@ class BrapiDataAdapter:
         url = f"{self._base_url}/quote/{ticker}"
         params = {
             "token": self._token,
-            "fundamental": "true",   # inclui P/VP, DY, vacância etc.
-            "dividends": "true",     # inclui últimos proventos anunciados
         }
 
         logger.debug("Fetching %s from brapi.dev", ticker)
@@ -81,31 +79,26 @@ class BrapiDataAdapter:
         # --- Cotação ---
         price = _require_float(data, "regularMarketPrice", ticker)
 
-        # --- Indicadores fundamentalistas ---
-        dy_12m = _to_float(data.get("dividendYield")) or 0.0
+        # P/VP, DY, vacância e LTV exigem plano pago na brapi — ficam zerados/None
+        # no plano free. As regras já tratam pvp=0.0 e dy_12m=0.0 como "sem dado".
+        dy_12m = 0.0
+        pvp = 0.0
+        vacancia = None
+        ltv = None
 
-        # P/VP retorna None se a API não tem o dado — NÃO fazemos fallback para 1.0
-        # porque isso silenciaria a regra de P/VP alto (ex: pvp > 1.15 nunca dispararia)
-        pvp = _to_float(data.get("priceToBook"))
+        # Liquidez = volume do dia × preço — disponível no plano free
+        volume = _to_float(data.get("regularMarketVolume")) or 0.0
+        liquidez = volume * price
 
-        # Liquidez financeira = volume médio de cotas × preço de fechamento.
-        # averageDailyVolume10Day é em cotas (não em R$) — multiplicar pelo preço
-        # converte para volume financeiro, que é o que as regras usam como threshold.
-        avg_volume_shares = _to_float(data.get("averageDailyVolume10Day")) or 0.0
-        liquidez = avg_volume_shares * price
-
-        # Vacância só existe para fundos de tijolo (shoppings, lajes, logística)
-        vacancia = _to_float(data.get("vacancyRate"))
-
-        # LTV só existe para fundos de papel (CRI, LCI)
-        ltv = _to_float(data.get("ltvRatio"))
+        # Variação percentual do dia — disponível no plano free
+        delta_price = _to_float(data.get("regularMarketChangePercent")) or 0.0
 
         # Provento anunciado: pega o mais recente se foi anunciado hoje
         provento_anunciado = _extract_latest_provento(data, ticker)
 
         logger.info(
-            "Fetched %s: price=%.2f dy=%.2f%% pvp=%s liquidez=%.0f",
-            ticker, price, dy_12m, f"{pvp:.2f}" if pvp is not None else "N/A", liquidez,
+            "Fetched %s: price=%.2f delta=%.2f%% liquidez=%.0f",
+            ticker, price, delta_price, liquidez,
         )
 
         return AssetSnapshot(
@@ -114,12 +107,12 @@ class BrapiDataAdapter:
             date=date.today(),
             price=price,
             dy_12m=dy_12m,
-            pvp=pvp if pvp is not None else 0.0,  # 0.0 aqui é safe — regras checam pvp > threshold
+            pvp=pvp,
             vacancia=vacancia,
             ltv=ltv,
             liquidez=liquidez,
+            delta_price=delta_price,
             provento_anunciado=provento_anunciado,
-            # Deltas em 0.0 — preenchidos pelo pipeline após busca no banco
         )
 
 
