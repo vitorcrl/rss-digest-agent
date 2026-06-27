@@ -39,15 +39,23 @@ class TemplateNarrator:
         date_br = context.date.strftime("%d/%m/%Y")
         lines: list[str] = [f"📊 FIIs — {date_br}", ""]
 
+        # Cotação de cada fundo — disponível mesmo sem plano pago
+        snap_by_ticker = {s.ticker: s for s in context.snapshots}
+        for snap in context.snapshots:
+            arrow = "🔴" if snap.delta_price < 0 else "🟢"
+            sign = "+" if snap.delta_price >= 0 else ""
+            lines.append(
+                f"{arrow} {snap.ticker}  R$ {snap.price:.2f}  {sign}{snap.delta_price:.2f}%"
+            )
+        if context.snapshots:
+            lines.append("")
+
         _severity_order = {
             AlertSeverity.critical: 0,
             AlertSeverity.warning: 1,
             AlertSeverity.info: 2,
         }
 
-        # Agrupa por ticker primeiro (groupby requer ordenação pela mesma key).
-        # Depois ordena os grupos pelo pior severity de cada ticker — assim um fundo
-        # com critical aparece antes de um com warning, independente do ticker alfabético.
         by_ticker: dict[str, list[Alert]] = {}
         for alert in context.alerts:
             by_ticker.setdefault(alert.ticker, []).append(alert)
@@ -58,15 +66,11 @@ class TemplateNarrator:
         )
 
         for ticker in sorted_tickers:
-            ticker_alerts = by_ticker[ticker]
-            alerts_list = list(ticker_alerts)
-
-            # Separa warnings/criticals de events (info) para formatar diferente
+            alerts_list = by_ticker[ticker]
             problems = [a for a in alerts_list if a.severity != AlertSeverity.info]
             events = [a for a in alerts_list if a.severity == AlertSeverity.info]
 
             if problems:
-                # Usa o ícone da severidade mais alta do grupo
                 top_severity = (
                     AlertSeverity.critical
                     if any(a.severity == AlertSeverity.critical for a in problems)
@@ -79,13 +83,11 @@ class TemplateNarrator:
                 lines.append("")
 
             for event in events:
-                # Eventos informativos ficam em linha única (ex: provento anunciado)
                 lines.append(f"{_ICON[AlertSeverity.info]} {ticker} — {event.message}")
 
         if context.total_events > 0:
             lines.append("")
 
-        # Rodapé com totais — mesmo formato do exemplo da spec
         lines.append(
             f"Watchlist: {context.watchlist_size} fundos | "
             f"{context.total_alerts} alertas | "
