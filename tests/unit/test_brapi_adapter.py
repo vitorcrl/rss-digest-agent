@@ -8,25 +8,17 @@ from app.adapters.data.brapi_adapter import BrapiDataAdapter, BrapiError
 
 def make_brapi_response(
     price: float = 97.50,
-    dy: float = 10.5,
-    pvp: float = 0.92,
-    avg_volume: float = 10_000,
-    vacancia: float | None = None,
-    ltv: float | None = None,
+    volume: float = 10_000,
+    change_percent: float = 0.5,
     dividends: list | None = None,
     status_code: int = 200,
 ) -> MagicMock:
-    """Monta uma resposta httpx mockada com a estrutura real da brapi.dev."""
+    """Monta uma resposta httpx mockada com a estrutura do plano free da brapi.dev."""
     data = {
         "regularMarketPrice": price,
-        "dividendYield": dy,
-        "priceToBook": pvp,
-        "averageDailyVolume10Day": avg_volume,
+        "regularMarketVolume": volume,
+        "regularMarketChangePercent": change_percent,
     }
-    if vacancia is not None:
-        data["vacancyRate"] = vacancia
-    if ltv is not None:
-        data["ltvRatio"] = ltv
     if dividends is not None:
         data["dividendsData"] = {"cashDividends": dividends}
 
@@ -72,27 +64,15 @@ class TestFetchBasicFields:
         snap = await adapter.fetch("KNCR11")
         assert snap.price == 98.70
 
-    async def test_dy_is_mapped(self, adapter, mock_httpx):
-        mock_httpx.get = AsyncMock(return_value=make_brapi_response(dy=11.2))
+    async def test_dy_is_zero_on_free_plan(self, adapter, mock_httpx):
+        # plano free da brapi não retorna dividendYield — adapter zera
+        mock_httpx.get = AsyncMock(return_value=make_brapi_response())
         snap = await adapter.fetch("KNCR11")
-        assert snap.dy_12m == 11.2
+        assert snap.dy_12m == 0.0
 
-    async def test_pvp_is_mapped(self, adapter, mock_httpx):
-        mock_httpx.get = AsyncMock(return_value=make_brapi_response(pvp=0.88))
-        snap = await adapter.fetch("KNCR11")
-        assert snap.pvp == 0.88
-
-    async def test_pvp_none_from_api_stored_as_zero(self, adapter, mock_httpx):
-        # pvp ausente na API → 0.0 no snapshot (as regras checam pvp > 0 antes de usar)
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {"results": [{
-            "regularMarketPrice": 100.0,
-            "dividendYield": 10.0,
-            "priceToBook": None,
-            "averageDailyVolume10Day": 5000,
-        }]}
-        mock_httpx.get = AsyncMock(return_value=response)
+    async def test_pvp_is_zero_on_free_plan(self, adapter, mock_httpx):
+        # plano free da brapi não retorna priceToBook — adapter zera
+        mock_httpx.get = AsyncMock(return_value=make_brapi_response())
         snap = await adapter.fetch("KNCR11")
         assert snap.pvp == 0.0
 
@@ -101,38 +81,30 @@ class TestLiquidezCalculation:
     async def test_liquidez_is_volume_times_price(self, adapter, mock_httpx):
         # 10.000 cotas × R$100 = R$1.000.000
         mock_httpx.get = AsyncMock(
-            return_value=make_brapi_response(price=100.0, avg_volume=10_000)
+            return_value=make_brapi_response(price=100.0, volume=10_000)
         )
         snap = await adapter.fetch("KNCR11")
         assert snap.liquidez == pytest.approx(1_000_000)
 
     async def test_liquidez_zero_when_no_volume(self, adapter, mock_httpx):
         mock_httpx.get = AsyncMock(
-            return_value=make_brapi_response(price=100.0, avg_volume=0)
+            return_value=make_brapi_response(price=100.0, volume=0)
         )
         snap = await adapter.fetch("KNCR11")
         assert snap.liquidez == 0.0
 
 
 class TestOptionalFields:
-    async def test_vacancia_mapped_when_present(self, adapter, mock_httpx):
-        mock_httpx.get = AsyncMock(return_value=make_brapi_response(vacancia=12.5))
+    async def test_vacancia_is_none_on_free_plan(self, adapter, mock_httpx):
+        # plano free não retorna vacancyRate
+        mock_httpx.get = AsyncMock(return_value=make_brapi_response())
         snap = await adapter.fetch("HSML11")
-        assert snap.vacancia == 12.5
-
-    async def test_vacancia_none_when_absent(self, adapter, mock_httpx):
-        mock_httpx.get = AsyncMock(return_value=make_brapi_response(vacancia=None))
-        snap = await adapter.fetch("KNCR11")
         assert snap.vacancia is None
 
-    async def test_ltv_mapped_when_present(self, adapter, mock_httpx):
-        mock_httpx.get = AsyncMock(return_value=make_brapi_response(ltv=68.0))
+    async def test_ltv_is_none_on_free_plan(self, adapter, mock_httpx):
+        # plano free não retorna ltvRatio
+        mock_httpx.get = AsyncMock(return_value=make_brapi_response())
         snap = await adapter.fetch("MXRF11")
-        assert snap.ltv == 68.0
-
-    async def test_ltv_none_when_absent(self, adapter, mock_httpx):
-        mock_httpx.get = AsyncMock(return_value=make_brapi_response(ltv=None))
-        snap = await adapter.fetch("HSML11")
         assert snap.ltv is None
 
 
@@ -142,9 +114,14 @@ class TestDeltasAreZeroOnFetch:
         mock_httpx.get = AsyncMock(return_value=make_brapi_response())
         snap = await adapter.fetch("KNCR11")
         assert snap.delta_dy == 0.0
-        assert snap.delta_price == 0.0
         assert snap.delta_vacancia == 0.0
         assert snap.delta_pvp == 0.0
+
+    async def test_delta_price_is_filled_from_api(self, adapter, mock_httpx):
+        # regularMarketChangePercent é disponível no plano free e preenchido diretamente
+        mock_httpx.get = AsyncMock(return_value=make_brapi_response(change_percent=-3.5))
+        snap = await adapter.fetch("KNCR11")
+        assert snap.delta_price == pytest.approx(-3.5)
 
 
 class TestProventoExtraction:
@@ -214,20 +191,18 @@ class TestErrorHandling:
 
 
 class TestToFloatEdgeCases:
-    async def test_non_numeric_string_returns_none(self, adapter, mock_httpx):
-        # Cobre _to_float com ValueError — brapi retorna string inválida
+    async def test_non_numeric_volume_results_in_zero_liquidez(self, adapter, mock_httpx):
+        # _to_float retorna None para strings não numéricas — volume vira 0
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {"results": [{
             "regularMarketPrice": 100.0,
-            "dividendYield": "N/A",   # string não numérica
-            "priceToBook": 0.92,
-            "averageDailyVolume10Day": 5000,
+            "regularMarketVolume": "N/A",
+            "regularMarketChangePercent": 0.0,
         }]}
         mock_httpx.get = AsyncMock(return_value=response)
         snap = await adapter.fetch("KNCR11")
-        # dy_12m deve ser 0.0 quando a API retorna "N/A"
-        assert snap.dy_12m == 0.0
+        assert snap.liquidez == 0.0
 
 
 class TestProventoEdgeCases:
