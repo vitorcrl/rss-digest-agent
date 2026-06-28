@@ -8,7 +8,6 @@ from alembic import context
 
 from app.core.config import settings
 from app.domain.models import Base
-import app.domain.models_fii  # noqa: F401 — força o Alembic a detectar as tabelas FII
 
 config = context.config
 
